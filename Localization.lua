@@ -1557,3 +1557,8 @@ else
 	ATSW_DAMAGE_ON_BLOCK_FOR = 'damage on block for '
 	ATSW_AND_ABOVE = ' and above'
 end
+
+-- /atsw enable and disable. Not translated yet, so these are shared by every language.
+ATSW_PROFESSION_DISABLED		= 'ATSW is off for %s. Type /atsw enable with its window open to turn it back on.'
+ATSW_PROFESSION_ENABLED		= 'ATSW is on for %s.'
+ATSW_OPEN_PROFESSION_FIRST	= 'Open a profession window first.'

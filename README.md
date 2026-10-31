@@ -79,6 +79,8 @@ This means that I can not test any possible issues with the addon.
   
   ATSW can be configured via built-in options menu. The menu can be shown by entering chat command **/atsw config**.
 
+  To use the game's stock window for one profession on the current character, type **/atsw disable** with that profession's window open. Type **/atsw enable** with the stock window open to switch back.
+
 
   ### Localization
   Supported languages: English, Русский, Español, Français, Deutsch, 简体中文

@@ -14,6 +14,8 @@ ATSW_AUCTION_ITEMS_DISPLAYED 	= 5
 
 ATSW_TABLE_CREATION_SIZE 			= 10
 
+ATSW_FontFile									= 'Fonts\\FRIZQT__.ttf' -- pfUISkin.lua replaces this
+
 ATSW_NECESSARY_REAGENT_ADD		= 1
 ATSW_NECESSARY_REAGENT_DELETE	= 2
 
@@ -247,7 +249,7 @@ local function GetUnitClass(Unit)
 	
 	if Class and string.len(Class) > 0 then
 		local First = string.upper(string.sub(Class, 1, 1))
-		local Rest = string.upper(string.sub(Class, 2))
+		local Rest = string.lower(string.sub(Class, 2))
 		
 		Class = First .. Rest
 	end
@@ -1332,7 +1334,9 @@ local function ClassColorize(Name)
 
 	for I in ipairs(ATSW_Characters[realm]) do
 		if ATSW_Characters[realm][I].Name == Name then
-			return Color[ATSW_Characters[realm][I].Class] .. Name .. '|r'
+			local ClassColor = Color[ATSW_Characters[realm][I].Class]
+
+			return ClassColor and (ClassColor .. Name .. '|r') or Name
 		end
 	end
 	
@@ -1593,11 +1597,13 @@ function ATSW_OnLoad()
 		end
 	end
 	
-	-- Fix Blizzard GameTooltip edges insets (from 5 to 4)
-	local R, G, B, A = GameTooltip:GetBackdropColor()
-	
-	GameTooltip:SetBackdrop({bgFile=[[Interface\Tooltips\UI-Tooltip-Background]], edgeFile=[[Interface\Tooltips\UI-Tooltip-Border]], tile = true, edgeSize = 16, tileSize = 16, insets = {left = 4, right = 4, top = 4, bottom = 4}})
-	GameTooltip:SetBackdropColor(R, G, B, A)
+	-- Fix Blizzard GameTooltip edges insets (from 5 to 4). pfUI has already skinned the tooltip by now.
+	if not pfUI then
+		local R, G, B, A = GameTooltip:GetBackdropColor()
+		
+		GameTooltip:SetBackdrop({bgFile=[[Interface\Tooltips\UI-Tooltip-Background]], edgeFile=[[Interface\Tooltips\UI-Tooltip-Border]], tile = true, edgeSize = 16, tileSize = 16, insets = {left = 4, right = 4, top = 4, bottom = 4}})
+		GameTooltip:SetBackdropColor(R, G, B, A)
+	end
 	
 	-- Fix a bug which shows error 'skillOffset is nil' on line 171 of Blizzard_TradeSkillUI.lua (modified by Turtle-WoW team)
 	FauxScrollFrame_SetOffset(TradeSkillListScrollFrame, 0)
@@ -2443,6 +2449,86 @@ function ATSW_UpdateFrame()
 	ATSW_ShowTrainingPoints()
 end
 
+-- Stock windows, for professions turned off with /atsw disable.
+-- One table, because this file is at Lua's limit of 200 locals in a chunk.
+
+ATSW_Disabled = {}
+
+local Stock = {Window = nil, Profession = nil}
+
+function Stock.IsDisabled(Prof)
+	local Characters = ATSW_Disabled[realm]
+	local Disabled = Characters and Characters[player]
+	
+	return Prof and Disabled and Disabled[Prof]
+end
+
+function Stock.SetDisabled(Prof, Value)
+	ATSW_Disabled[realm] = ATSW_Disabled[realm] or {}
+	ATSW_Disabled[realm][player] = ATSW_Disabled[realm][player] or {}
+	ATSW_Disabled[realm][player][Prof] = Value and true or nil
+end
+
+-- ATSW_OnLoad takes these events from the stock windows, which need them while they are open
+function Stock.Show(Prof)
+	Stock.Profession = Prof
+	
+	if TradeSkill then
+		Stock.Window = TradeSkillFrame
+		RegisterEvents(TradeSkillFrame, 'TRADE_SKILL_UPDATE', 'PLAYER_ENTERING_WORLD')
+		TradeSkillFrame_Show()
+	else
+		Stock.Window = CraftFrame
+		RegisterEvents(CraftFrame, 'CRAFT_UPDATE', 'SPELLS_CHANGED', 'UNIT_PET_TRAINING_POINTS')
+		CraftFrame_Show()
+	end
+end
+
+-- A stock window's OnHide closes the profession. KeepOpen is for handing the same open
+-- profession over to ATSW, or for a profession that has just replaced it.
+function Stock.Hide(KeepOpen)
+	local Frame = Stock.Window
+	
+	if not Frame then
+		return
+	end
+	
+	if Frame:IsVisible() then
+		if KeepOpen then
+			local OnHide = Frame:GetScript('OnHide')
+			
+			Frame:SetScript('OnHide', nil)
+			HideUIPanel(Frame)
+			Frame:SetScript('OnHide', OnHide)
+		else
+			HideUIPanel(Frame)
+		end
+	end
+	
+	if Frame == TradeSkillFrame then
+		UnregisterEvents(TradeSkillFrame, 'TRADE_SKILL_UPDATE', 'PLAYER_ENTERING_WORLD')
+	else
+		UnregisterEvents(CraftFrame, 'CRAFT_UPDATE', 'SPELLS_CHANGED', 'UNIT_PET_TRAINING_POINTS')
+	end
+	
+	Stock.Window, Stock.Profession = nil, nil
+end
+
+function Stock.Open()
+	local Prof = GetCraftCaption()
+	
+	if Stock.IsDisabled(Prof) then
+		if ATSWFrame:IsVisible() or ATSWCSFrame:IsVisible() then
+			ATSW_Hide()
+		end
+		
+		Stock.Show(Prof)
+	else
+		Stock.Hide(true)
+		ATSW_Show()
+	end
+end
+
 function ATSW_OnEvent()
 	if ATSW_Debug then
 		local s = ''
@@ -2600,14 +2686,15 @@ function ATSW_OnEvent()
 					[17771] = {R = 0.78, G = 0.73 ,B = 0.86}, -- Elementium
 				}
 				
-				local function GetColor(ID)
-					return Colors[ID].R, Colors[ID].G, Colors[ID].B
-				end
-				
 				if IsSmelting() then
-					R, G, B = GetColor(GetRecipeID(Processing.Recipe))
+					-- Bars without an entry (like OctoWoW's Dreamsteel) keep the default color
+					local BarColor = Colors[GetRecipeID(Processing.Recipe)]
+
+					if BarColor then
+						R, G, B = BarColor.R, BarColor.G, BarColor.B
+					end
 				end
-				
+
 				ATSWProgressBarTexture:SetVertexColor(R, G, B)
 			end
 			
@@ -2684,14 +2771,14 @@ function ATSW_OnEvent()
 			
 			if ATSW_ProfessionExists(Skill) then
 				-- Reset previous recipes
-				for I = 1, PreviousRecipesSize(Skill) do
-					table.remove(PreviousRecipes(Skill), PreviousRecipesSize(Skill)-1+I)
+				for I = PreviousRecipesSize(Skill), 1, -1 do
+					table.remove(PreviousRecipes(Skill), I)
 				end
 				
 				ATSW_ConfigureSkillButtons(Skill) -- Reconfigure tabs except Skill
 				
 				-- Reset tasks
-				for I = 1, TasksSize(Skill) do
+				for I = TasksSize(Skill), 1, -1 do
 					ATSW_DeleteTask(Task(I, Skill).Name, nil, Skill)
 				end
 				
@@ -2771,21 +2858,31 @@ function ATSW_OnEvent()
 		end
 	elseif 	event == 'TRADE_SKILL_SHOW' 						then
 		if UIParent:IsVisible() then
-			if ATSWFrame:IsVisible() or ATSWCSFrame:IsVisible() then
+			if ATSWFrame:IsVisible() or ATSWCSFrame:IsVisible() or Stock.Window == CraftFrame then
 				ATSWFrame:	UnregisterEvent	('CRAFT_CLOSE'		)
+				
+				if Stock.Window == CraftFrame then
+					Stock.Hide()
+				end
+				
 				CloseCraft()
 				ATSWFrame:	RegisterEvent		('CRAFT_CLOSE'		)
 			end
 			
 			TradeSkill = true
-			ATSW_Show()
+			Stock.Open()
 		else
 			CloseTradeSkill()
 		end
 	elseif 	event == 'CRAFT_SHOW' 									then
 		if UIParent:IsVisible() then
-			if ATSWFrame:IsVisible() or ATSWCSFrame:IsVisible() then
+			if ATSWFrame:IsVisible() or ATSWCSFrame:IsVisible() or Stock.Window == TradeSkillFrame then
 				ATSWFrame:	UnregisterEvent	('TRADE_SKILL_CLOSE')
+				
+				if Stock.Window == TradeSkillFrame then
+					Stock.Hide()
+				end
+				
 				CloseTradeSkill()
 				
 				if TradeSkill then
@@ -2796,14 +2893,22 @@ function ATSW_OnEvent()
 			end
 		
 			TradeSkill = false
-			ATSW_Show()
+			Stock.Open()
 		else
 			CloseCraft()
 		end
 	elseif event == 'TRADE_SKILL_CLOSE' then
-		ATSW_Hide()
+		if not Stock.Window then
+			ATSW_Hide()
+		elseif Stock.Window == TradeSkillFrame then
+			Stock.Hide()
+		end
 	elseif event == 'CRAFT_CLOSE' then
-		ATSW_Hide()
+		if not Stock.Window then
+			ATSW_Hide()
+		elseif Stock.Window == CraftFrame then
+			Stock.Hide()
+		end
     end
 end
 
@@ -2909,13 +3014,15 @@ function ATSWReagentsButton_OnClick()
     if ATSWReagentsFrame:IsVisible() then
         ATSWReagentsFrame:Hide()
     else
-		for R = 1, ATSW_NECESSARIES_DISPLAYED do -- Create reagent frame buttons
-			local F = CreateFrame('Frame', 'ATSWRFReagent' .. R, ATSWReagentsFrame, 'ATSWRFReagentTemplate')
-			
-			if R == 1 then
-				F:SetPoint('TOPLEFT', 26, -59)
-			else
-				F:SetPoint('TOPLEFT', 'ATSWRFReagent' .. R - 1, 'BOTTOMLEFT')
+		if not ATSWRFReagent1 then
+			for R = 1, ATSW_NECESSARIES_DISPLAYED do -- Create reagent frame buttons
+				local F = CreateFrame('Frame', 'ATSWRFReagent' .. R, ATSWReagentsFrame, 'ATSWRFReagentTemplate')
+
+				if R == 1 then
+					F:SetPoint('TOPLEFT', 26, -59)
+				else
+					F:SetPoint('TOPLEFT', 'ATSWRFReagent' .. R - 1, 'BOTTOMLEFT')
+				end
 			end
 		end
 		
@@ -3038,6 +3145,36 @@ function ATSW_Command(Command)
 		ATSW_ToggleOptionsFrame()
 	elseif 	Command == 'debug' 	then
 		ATSW_Debug = not ATSW_Debug
+	elseif 	Command == 'disable' 	then
+		if ATSWFrame:IsVisible() or ATSWCSFrame:IsVisible() then
+			local Prof = Profession()
+			
+			Stock.SetDisabled(Prof, true)
+			ATSW_Hide()
+			Stock.Show(Prof)
+			Chat(format(ATSW_PROFESSION_DISABLED, Prof))
+		elseif Stock.Window then
+			Chat(format(ATSW_PROFESSION_DISABLED, Stock.Profession))
+		else
+			Chat(ATSW_OPEN_PROFESSION_FIRST)
+		end
+	elseif 	Command == 'enable' 	then
+		if Stock.Window then
+			local Prof = Stock.Profession
+			
+			Stock.SetDisabled(Prof, false)
+			
+			-- Smelting's name comes from the last spell cast, which may have changed since it opened
+			LastCastName = Prof
+			
+			Stock.Hide(true)
+			ATSW_Show()
+			Chat(format(ATSW_PROFESSION_ENABLED, Prof))
+		elseif ATSWFrame:IsVisible() or ATSWCSFrame:IsVisible() then
+			Chat(format(ATSW_PROFESSION_ENABLED, Profession()))
+		else
+			Chat(ATSW_OPEN_PROFESSION_FIRST)
+		end
     else
 		ATSW_ShowFrame()
 	end
@@ -3785,7 +3922,7 @@ local function GetAttributes(Recipe)
 						if Item.Return then
 							local Minus = ''
 							
-							if Item.ReplaceWords == 1then
+							if Item.ReplaceWords == 1 then
 								A = ReplaceWords(A)
 							end
 							
@@ -3973,10 +4110,10 @@ function ATSW_UpdateRecipes()
 			
 			if ATSW_ShowAttributes() and R.Type ~= 'header' then
 				Text = GetAttributes(R)
-				Button:SetFont('Fonts\\FRIZQT__.ttf', 10)
+				Button:SetFont(ATSW_FontFile, 10)
 			else
 				Text = R.Name .. SubNameToString(R.SubName)
-				Button:SetFont('Fonts\\FRIZQT__.ttf', 12)
+				Button:SetFont(ATSW_FontFile, 12)
 			end
 			
 			Text = Text .. (Possible or '')
@@ -5555,9 +5692,9 @@ function CreateDynamicTooltip(TooltipName)
         end
 
 		if R and R > 1 then -- Set font
-			LeftFontString:SetFont('Fonts\\FRIZQT__.ttf', R)
+			LeftFontString:SetFont(ATSW_FontFile, R)
 		elseif not IsHeader then
-			LeftFontString:SetFont('Fonts\\FRIZQT__.ttf', 12)
+			LeftFontString:SetFont(ATSW_FontFile, 12)
 		end
 		
         LeftFontString:SetText(LeftText)
@@ -5822,6 +5959,11 @@ end
 ATSW_Bags = {}
 
 function ATSW_SaveBag(Bag)
+	-- Only the backpack and bag slots. BAG_UPDATE also fires for bank bags, which ATSW_Bank already counts
+	if Bag < 0 or Bag > 4 then
+		return
+	end
+
     if ATSW_Bags[realm] == nil then
         ATSW_Bags[realm] = {}
     end
@@ -5979,7 +6121,7 @@ local function GetAltsAmountInBank(Name, PlayerName)
 	
 	if Name and Table then
 		for PName in pairs(Table) do
-			if PName ~= player then
+			if (PlayerName and PlayerName == PName) or (PlayerName == nil and PName ~= player) then
 				for IName, IAmount in pairs(Table[PName]) do
 					if IName == Name then
 						Amount = Amount + IAmount
@@ -5996,7 +6138,7 @@ function ATSW_GetAltsAmount(Name)
     return GetAltsAmountInBags(Name) + GetAltsAmountInBank(Name)
 end
 
-local function GetLocation(Table, In)
+local function GetLocation(Name, Table, In, Tooltip, HeaderAdded)
 	if Name then
 		for RName in pairs(Table) do
 			if RName == realm then
@@ -6024,18 +6166,26 @@ local function GetLocation(Table, In)
 			end
 		end
 	end
+
+	return HeaderAdded
 end
 
 function ATSW_GetAltsLocationIntoTooltip(Name)
-	local HeaderAdded = false
 	local Tooltip = ATSWRecipeTooltip
-	
+
 	Tooltip:ClearLines()
 	Tooltip:SetOwner(this, 'ANCHOR_BOTTOMRIGHT', 0)
-	
-	GetLocation(ATSW_Bags, ATSW_ALTLIST1)
-	GetLocation(ATSW_Bank, ATSW_ALTLIST2)
-	
+
+	local HeaderAdded = GetLocation(Name, ATSW_Bags, ATSW_ALTLIST1, Tooltip, false)
+	HeaderAdded = GetLocation(Name, ATSW_Bank, ATSW_ALTLIST2, Tooltip, HeaderAdded)
+
+	-- No alt has the item: don't show an empty tooltip
+	if not HeaderAdded then
+		Tooltip:Hide()
+
+		return
+	end
+
 	Tooltip:Show()
 	Tooltip:SetWidth(Tooltip.MaxLineWidth)
 	Tooltip:SetHeight(18 + Tooltip.NumLines * 16)
@@ -6076,7 +6226,7 @@ local function GetMerchantReagentsPrice(Buy)
 			local MName, _, MPrice, MQuantity, MAvailable = GetMerchantItemInfo(M)
 			
 			if Item.Name == MName then
-				local HaveQuantity	= ATSW_GetBagsAmount(Item.Name) + (ATSW_ConsigerBank and ATSW_GetBankAmount(Item.Name) or 0)
+				local HaveQuantity	= ATSW_GetBagsAmount(Item.Name) + (ATSW_Options.ConsiderBank and ATSW_GetBankAmount(Item.Name) or 0)
 				local NeedQuantity	= Item.Amount - HaveQuantity
 				local BuyQuantity = math.ceil(NeedQuantity / MQuantity)
 				
