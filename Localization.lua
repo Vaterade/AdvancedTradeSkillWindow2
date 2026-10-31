@@ -1562,3 +1562,4 @@ end
 ATSW_PROFESSION_DISABLED		= 'ATSW is off for %s. Type /atsw enable with its window open to turn it back on.'
 ATSW_PROFESSION_ENABLED		= 'ATSW is on for %s.'
 ATSW_OPEN_PROFESSION_FIRST	= 'Open a profession window first.'
+ATSW_LINKED_PROFESSION			= 'This window shows another player\'s profession, so ATSW stays off for it.'

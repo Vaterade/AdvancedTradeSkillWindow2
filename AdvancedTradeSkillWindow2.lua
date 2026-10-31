@@ -1583,6 +1583,12 @@ function ATSW_OnLoad()
 		'CVAR_UPDATE',
 		'UI_ERROR_MESSAGE')
 	
+	-- ClassicAPI adds this event, and has no function to test for it directly
+	if IsTradeSkillLinked then
+		ATSWFrame:RegisterEvent('BAG_UPDATE_DELAYED')
+		ATSWFrame.DelayedBagUpdates = true
+	end
+	
 	-- Attach name sort checkbox
 	ATSWNameSortCheckbox:SetPoint('LEFT', ATSWDifficultySortCheckbox, 'RIGHT', ATSWDifficultySortCheckboxText2:GetWidth()+5, 0)
 	
@@ -2470,8 +2476,9 @@ function Stock.SetDisabled(Prof, Value)
 end
 
 -- ATSW_OnLoad takes these events from the stock windows, which need them while they are open
-function Stock.Show(Prof)
+function Stock.Show(Prof, Linked)
 	Stock.Profession = Prof
+	Stock.Linked = Linked
 	
 	if TradeSkill then
 		Stock.Window = TradeSkillFrame
@@ -2511,22 +2518,54 @@ function Stock.Hide(KeepOpen)
 		UnregisterEvents(CraftFrame, 'CRAFT_UPDATE', 'SPELLS_CHANGED', 'UNIT_PET_TRAINING_POINTS')
 	end
 	
-	Stock.Window, Stock.Profession = nil, nil
+	Stock.Window, Stock.Profession, Stock.Linked = nil, nil, nil
+end
+
+-- ClassicAPI's profession links open the same windows with another player's recipes, which must not
+-- reach ATSW's recipe list and tasks
+function Stock.IsLinked()
+	if TradeSkill then
+		return IsTradeSkillLinked and IsTradeSkillLinked()
+	else
+		return IsCraftLinked and IsCraftLinked()
+	end
 end
 
 function Stock.Open()
-	local Prof = GetCraftCaption()
+	local Linked = Stock.IsLinked()
+	local Prof = not Linked and GetCraftCaption()
 	
-	if Stock.IsDisabled(Prof) then
+	if Linked or Stock.IsDisabled(Prof) then
 		if ATSWFrame:IsVisible() or ATSWCSFrame:IsVisible() then
 			ATSW_Hide()
 		end
 		
-		Stock.Show(Prof)
+		Stock.Show(Prof, Linked)
 	else
 		Stock.Hide(true)
 		ATSW_Show()
 	end
+end
+
+-- Redraws everything that shows item counts. A trade or a stack split fires many BAG_UPDATEs at once,
+-- so with ClassicAPI this runs once per frame, from BAG_UPDATE_DELAYED.
+function ATSW_OnBagsChanged()
+	if BankFrameOpened then
+		ATSW_SaveBank()
+	end
+	
+	if ATSWFrame:					IsVisible() 	then 	ATSW_UpdateRecipes					()
+																		ATSW_UpdateTasks					()
+																		
+	if RecipeSelected()								then 	ATSW_SelectRecipe(RecipeSelected()) 	end end
+	
+	if ATSWCSFrame:				IsVisible() 	then 	ATSWCS_UpdateATSWFrame		()
+																		ATSWCS_Update						()		end
+	
+	ATSW_UpdateNecessaryReagents()
+	
+	if MerchantFrame:				IsVisible() 	then 	ATSW_SetBuyFrameVisible			() 	end
+	if ATSWShoppingListFrame:	IsVisible() 	then 	ATSW_UpdateAuctionList			() 	end
 end
 
 function ATSW_OnEvent()
@@ -2612,53 +2651,15 @@ function ATSW_OnEvent()
         ATSWShoppingListFrame:Hide()
 	
     elseif 	event == 'BAG_UPDATE' 								then
-		if BankFrameOpened then
-			ATSW_SaveBank()
-		end
-		
 		ATSW_SaveBag(arg1)
 		
-		if ATSWFrame:IsVisible() then
-			-- Check if a selected tool is update
-			for Slot = 1, GetContainerNumSlots(arg1) do
-				local function ToolIsUpdating(BID)
-					for I = 1, ATSW_TOOLS_DISPLAYED do
-						local Button = _G['ATSWTool' .. I]
-						
-						if Button:IsVisible() then
-							local ToolID = ToolID[Button.Name]
-						
-							if BID == ToolID then
-								return true
-							end
-						end
-					end
-					
-					return false
-				end
-				
-				local BID = ATSW_LinkToID(GetContainerItemLink(arg1, Slot))
-				
-				if ToolIsUpdating(BID) then
-					ATSW_SelectRecipe(RecipeSelected())
-				end
-			end
+		if not ATSWFrame.DelayedBagUpdates then
+			ATSW_OnBagsChanged()
 		end
 		
-		-- Update all frame sections
+	elseif 	event == 'BAG_UPDATE_DELAYED' 					then
 		
-		if ATSWFrame:					IsVisible() 	then 	ATSW_UpdateRecipes					()
-																			ATSW_UpdateTasks					()
-																			
-		if RecipeSelected()								then 	ATSW_SelectRecipe(RecipeSelected()) 	end end
-		
-		if ATSWCSFrame:				IsVisible() 	then 	ATSWCS_UpdateATSWFrame		()
-																			ATSWCS_Update						()		end
-		
-		ATSW_UpdateNecessaryReagents()
-		
-		if MerchantFrame:				IsVisible() 	then 	ATSW_SetBuyFrameVisible			() 	end
-		if ATSWShoppingListFrame:	IsVisible() 	then 	ATSW_UpdateAuctionList			() 	end
+		ATSW_OnBagsChanged()
 		
     elseif 	event == 'TRADE_SKILL_UPDATE'
 	or 		event == 'CRAFT_UPDATE' 							then
@@ -3145,6 +3146,8 @@ function ATSW_Command(Command)
 		ATSW_ToggleOptionsFrame()
 	elseif 	Command == 'debug' 	then
 		ATSW_Debug = not ATSW_Debug
+	elseif 	(Command == 'disable' or Command == 'enable') and Stock.Linked then
+		Chat(ATSW_LINKED_PROFESSION)
 	elseif 	Command == 'disable' 	then
 		if ATSWFrame:IsVisible() or ATSWCSFrame:IsVisible() then
 			local Prof = Profession()
