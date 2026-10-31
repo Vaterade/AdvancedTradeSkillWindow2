@@ -30,6 +30,7 @@ ATSW_FLASH 									= 2
 ATSW_FADEOUT 								= 3
 
 ATSW_FLASH_TIME							= 5/60
+ATSW_NEXT_CAST_TIMEOUT				= 5
 ATSW_FADEOUT_TIME						= 10/60
 
 ERR_LEARN_RECIPE_PATTERN 			= string.gsub(ERR_LEARN_RECIPE_S, 			'%%s', '(.+)'		)
@@ -270,6 +271,28 @@ local TradeSkill
 
 function ATSW_TradeSkill()
 	return TradeSkill
+end
+
+-- ClassicAPI's profession link names the spell that opened the window
+function ATSW_ProfessionFromLink()
+	local GetLink
+	
+	if TradeSkill then
+		GetLink = GetTradeSkillListLink
+	else
+		GetLink = GetCraftListLink
+	end
+	
+	local Link = GetLink and GetSpellInfo and GetLink()
+	
+	if Link then
+		local _, _, ID = string.find(Link, '|Htrade:(%d+):')
+		local Name = ID and GetSpellInfo(tonumber(ID))
+		
+		if ATSW_ProfessionExists(Name) then
+			return Name
+		end
+	end
 end
 
 local InitializedOnShow 						= false
@@ -685,7 +708,8 @@ local function GetCraftCaption()
 	if ATSW_ProfessionExists(Skill) then
 		Name = Skill
 	else
-		Name = LastCastName
+		-- Smelting's window calls itself Mining
+		Name = ATSW_ProfessionFromLink() or ATSW_LastCast()
 	end
 	
 	return Name, Rank, MaxRank
@@ -1106,6 +1130,7 @@ local function MyCastSpellByName(Name, OnSelf)
 	local Storage = PlaySound
 	
 	LastCastName = Name
+	Processing.LastActionSlot = nil
 	
 	PlaySound = Stub	
 	Original_CastSpellByName(Name, OnSelf)
@@ -1119,6 +1144,7 @@ local function MyCastSpell(spellID, spellbookType)
 	local Storage = PlaySound
 	
 	LastCastName = GetSpellName(spellID, spellbookType)
+	Processing.LastActionSlot = nil
 	
 	PlaySound = Stub
 	Original_CastSpell(spellID, spellbookType)
@@ -1138,13 +1164,23 @@ local Original_UseAction = UseAction
 local function MyUseAction(Slot, CheckCursor, OnSelf)
 	local Storage = PlaySound
 	
-	LastCastName = GetNameFromTooltip(Slot)
+	-- Reading the name takes a tooltip scan, so wait until something asks for it
+	Processing.LastActionSlot = Slot
 	
 	PlaySound = Stub
 	Original_UseAction(Slot, CheckCursor, OnSelf)
 	PlaySound = Storage
 end
 UseAction = MyUseAction
+
+function ATSW_LastCast()
+	if Processing.LastActionSlot then
+		LastCastName = GetNameFromTooltip(Processing.LastActionSlot)
+		Processing.LastActionSlot = nil
+	end
+	
+	return LastCastName
+end
 
 -- Craft delay detection functions
 
@@ -1583,10 +1619,10 @@ function ATSW_OnLoad()
 		'CVAR_UPDATE',
 		'UI_ERROR_MESSAGE')
 	
-	-- ClassicAPI adds this event, and has no function to test for it directly
+	-- ClassicAPI adds this event and the UNIT_SPELLCAST ones, which have no function to test for directly
 	if IsTradeSkillLinked then
 		ATSWFrame:RegisterEvent('BAG_UPDATE_DELAYED')
-		ATSWFrame.DelayedBagUpdates = true
+		ATSWFrame.ClassicAPI = true
 	end
 	
 	-- Attach name sort checkbox
@@ -1834,6 +1870,11 @@ function ATSW_OnUpdate(TimePassed)
 		ATSW_ArmorCraftCompatibility()
     end
 	
+	-- A batch can end without an event, for instance if the game stops repeating it
+	if Processing.CastDeadline and GetTime() > Processing.CastDeadline then
+		ATSW_StopProcessing()
+	end
+	
 	-- Progress bar
 	
 	if ATSWProgressBar.Working then
@@ -1886,7 +1927,7 @@ function ATSW_OnUpdate(TimePassed)
 				Bar:		SetValue(GetTime())
 				Spark:	SetPoint('CENTER', Bar, 'LEFT', (1 - (Bar.EndTime - GetTime())/(Bar.EndTime - Bar.StartTime)) * Bar:GetWidth(), -1)
 			else
-				if IsEnchant(Processing.Texture) then
+				if IsEnchant(Processing.Texture) and not ATSWFrame.ClassicAPI then
 					Bar.Mode = ATSW_FLASH
 				end
 			end
@@ -1942,6 +1983,10 @@ local function Delay(Function, Time)
 	ATSW_Delayed = Function
 	ATSW_InTime = GetTime() + Time
 	Delayed = true
+end
+
+function ATSW_WindowIsOpen()
+	return ATSWFrame:IsVisible() or ATSWCSFrame:IsVisible()
 end
 
 function ATSW_ProfessionExists(Prof)
@@ -2141,7 +2186,8 @@ function ATSW_SwitchToFrame(Frame)
 		end
 	end
 	
-	if not Frame and Processing.Active then
+	-- The game may keep crafting, and only ClassicAPI's cast events can keep count without the window
+	if not Frame and Processing.Active and not ATSWFrame.ClassicAPI then
 		Processing.Stop = true
 	end
 	
@@ -2653,7 +2699,7 @@ function ATSW_OnEvent()
     elseif 	event == 'BAG_UPDATE' 								then
 		ATSW_SaveBag(arg1)
 		
-		if not ATSWFrame.DelayedBagUpdates then
+		if not ATSWFrame.ClassicAPI then
 			ATSW_OnBagsChanged()
 		end
 		
@@ -2667,6 +2713,10 @@ function ATSW_OnEvent()
 		UpdateCount = UpdateCount + 1
 	
     elseif 	event == 'SPELLCAST_START'  						then
+		
+		if arg1 == Processing.Recipe then
+			Processing.CastDeadline = nil
+		end
 		
 		if arg1 == Processing.Recipe and not Processing.Active then
 			local function ColorizeProgressBar()
@@ -2801,30 +2851,26 @@ function ATSW_OnEvent()
 		end
 	elseif 	event == 'CHAT_MSG_LOOT' 						then
 		
-		-- Task completion
-		if Processing.Active then
+		-- Task completion. ClassicAPI's cast events do this instead when they are available.
+		if Processing.Active and not ATSWFrame.ClassicAPI then
 			if string.find(arg1, LOOT_ITEM_CREATED_SELF_PATTERN) then -- React on 'You create: %s' pattern
-				Bar = ATSWProgressBar
-				
-				if Processing.Amount > 1 then
-					ATSW_CompleteTask()
-				else
-					if Processing.Stop then
-						ATSW_CompleteTask() -- Complete immediately
-					else
-						Bar.Mode = ATSW_FLASH -- Start flash animation
-					end
-				end
-				
-				RecipesRemaining = Processing.Amount - Processing.Complete
-				
-				TimePassed 	= GetTime() - Bar.StartTime
-				ERT 				= (Processing.RecipeTime + GetLatency()) * RecipesRemaining -- Estimated remaining time
-				
-				Bar.EndTime = GetTime() + TimePassed + ERT
-				
-				Bar:SetMinMaxValues(Bar.StartTime, Bar.EndTime)
+				ATSW_CraftFinished()
 			end
+		end
+	elseif 	event == 'UNIT_SPELLCAST_SUCCEEDED' 			then
+		
+		if arg1 == 'player' and arg4 == Processing.Recipe and Processing.Active then
+			ATSW_CraftFinished()
+			
+			-- The next cast of a batch should start right away. See ATSW_OnUpdate.
+			if Processing.Active and Processing.Amount > 0 and ATSWProgressBar.Mode == ATSW_CAST then
+				Processing.CastDeadline = GetTime() + ATSW_NEXT_CAST_TIMEOUT
+			end
+		end
+	elseif 	event == 'UNIT_SPELLCAST_FAILED' 					then
+		
+		if arg1 == 'player' and arg4 == Processing.Recipe and Processing.Active then
+			ATSW_StopProcessing()
 		end
 	elseif 	event == 'CHAT_MSG_SKILL' 							then
 	
@@ -2886,7 +2932,7 @@ function ATSW_OnEvent()
 				
 				CloseTradeSkill()
 				
-				if TradeSkill then
+				if TradeSkill and not ATSWFrame.ClassicAPI then
 					Processing.Stop = true
 				end
 				
@@ -3167,8 +3213,9 @@ function ATSW_Command(Command)
 			
 			Stock.SetDisabled(Prof, false)
 			
-			-- Smelting's name comes from the last spell cast, which may have changed since it opened
+			-- Smelting's name can come from the last spell cast, which may have changed since it opened
 			LastCastName = Prof
+			Processing.LastActionSlot = nil
 			
 			Stock.Hide(true)
 			ATSW_Show()
@@ -5159,7 +5206,7 @@ function ATSW_AddTask(Name, Amount, Link, Texture, Recursive, NecessaryReagentMo
 					Merchant = ATSW_Options.ConsiderMerchants and ATSW_Merchant[R.Name] and 0 or 1
 					
 					if GetRecipePosition(R.Name, Prof) then
-						local Min = GetCraftMinMax(GetRecipePosition(R.Name, Prof))
+						local Min = GetCraftMinMax(GetRecipePosition(R.Name, Prof)) or 1 -- Nil once the window has closed
 						
 						Required = math.ceil(((AmountInTasksIndirect(R.Name, Prof) - (AmountInTasksDirect(R.Name, Prof) * Min) - math.ceil(Possession(R.Name) / Min))) / Min) * Merchant
 						
@@ -5178,7 +5225,7 @@ function ATSW_AddTask(Name, Amount, Link, Texture, Recursive, NecessaryReagentMo
 					ATSW_AddTask(R.Name, Required, R.Link, R.Texture, true, NecessaryReagentMode, InsertBefore or Insert , Prof)
 				end
 				
-				if not Recursive then
+				if not Recursive and ATSW_WindowIsOpen() then
 					ATSW_UpdateRecipes()
 					ATSW_UpdateTasks()
 				end
@@ -5212,7 +5259,7 @@ function ATSW_DeleteTask(Name, Amount, Prof)
 			end
 			
 			-- Update lists
-			if not (Prof and Prof ~= Profession()) then
+			if not (Prof and Prof ~= Profession()) and ATSW_WindowIsOpen() then
 				ATSW_UpdateRecipes()
 				ATSW_UpdateTasks()
 			end
@@ -5240,6 +5287,12 @@ ATSW_Time = 0
 function ATSW_StartProcessing()
 	ATSWFrame:RegisterEvent('SPELLCAST_INTERRUPTED')
 	
+	if ATSWFrame.ClassicAPI then
+		ATSWFrame:RegisterEvent('UNIT_SPELLCAST_SUCCEEDED')
+		ATSWFrame:RegisterEvent('UNIT_SPELLCAST_FAILED')
+	end
+	
+	Processing.CastDeadline		= nil
 	Processing.Complete			= 0
 	Processing.Stop					= false
 	Processing.Active				= true
@@ -5265,6 +5318,12 @@ function ATSW_StopProcessing()
 	ATSWFrame:UnregisterEvent('SPELLCAST_START')
 	ATSWFrame:UnregisterEvent('SPELLCAST_INTERRUPTED')
 	
+	if ATSWFrame.ClassicAPI then
+		ATSWFrame:UnregisterEvent('UNIT_SPELLCAST_SUCCEEDED')
+		ATSWFrame:UnregisterEvent('UNIT_SPELLCAST_FAILED')
+	end
+	
+	Processing.CastDeadline		= nil
 	Processing.Active				= false
 	Processing.Stop					= false
 	ATSWProgressBar.Working 	= false
@@ -5272,7 +5331,30 @@ function ATSW_StopProcessing()
 	ATSWProgressBar:Hide()
 	
 	ATSW_PushCreateButton(false)
-	ATSW_UpdateTasks()
+	
+	if ATSW_WindowIsOpen() then
+		ATSW_UpdateTasks()
+	end
+end
+
+-- One craft of the current task has gone off
+function ATSW_CraftFinished()
+	local Bar = ATSWProgressBar
+	
+	if Processing.Amount > 1 or Processing.Stop or not ATSW_WindowIsOpen() then
+		ATSW_CompleteTask()
+	else
+		Bar.Mode = ATSW_FLASH -- Start flash animation
+	end
+	
+	local RecipesRemaining = Processing.Amount - Processing.Complete
+	
+	local TimePassed 	= GetTime() - Bar.StartTime
+	local ERT 				= (Processing.RecipeTime + GetLatency()) * RecipesRemaining -- Estimated remaining time
+	
+	Bar.EndTime = GetTime() + TimePassed + ERT
+	
+	Bar:SetMinMaxValues(Bar.StartTime, Bar.EndTime)
 end
 
 function ATSW_CompleteTask()
