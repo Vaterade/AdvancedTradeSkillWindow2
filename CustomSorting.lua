@@ -239,7 +239,7 @@ function ATSWCS_OnLoad()
 end
 
 function ATSWCS_OnShow()
-	Name = Profession()
+	local Name = Profession()
 	
 	if not Name then
 		return
@@ -379,6 +379,8 @@ local function PrepareForMove()
 	if Type == 'header' then
 		Index = CatIndex
 	else
+		local _
+		
 		_, Index = GetCategoryItemByItemName(GetSelected())
 	end
 	
@@ -467,6 +469,8 @@ function ATSWCSFrameDelete_OnClick()
 			ATSWCS_UpdateRecipes()
 		end
 	else
+		local _
+		
 		_, Index = GetCategoryItemByItemName(GetSelected())
 		local NewC, NewI = CategorySelected()
 		local WasLast = IsLast(GetSelected())
@@ -609,7 +613,7 @@ function ATSWCS_UpdateCategories()
 		local ButtonHighlight 		= getglobal('ATSWCSCategory' .. I .. 'SkillButtonHighlight')
 		
 		local Index = I + ScrollOffset
-		local Name, SubName, Type, Texture, Expanded
+		local CatIndex, Name, SubName, Type, Texture, Expanded
 		local ItemExists 				= Index <= ListSize
 		
 		if ItemExists then

@@ -75,7 +75,9 @@ local ToolID = {
 	['Runed Silver Rod'				] 		= 6339,
 	['Runed Golden Rod'			] 		= 11130,
 	['Runed Truesilver Rod'		] 		= 11145,
-	['Runed Arcanite Rod'			] 		= 16207
+	['Runed Arcanite Rod'			] 		= 16207,
+	['Jewelry Lens'					] 		= 41326,
+	['Jewelry Scope'					] 		= 41327
 }
 
 local Professions	= {
@@ -312,7 +314,6 @@ local sRequires 	= string.sub(s, 1, string.find(s, '%s')) 	-- Delete %s
 ATSW_Debug 									= false
 
 ATSW_SwitchingFrames						= false
-ATSW_SwitchingToEditor					= false
 ATSW_SwitchingToMain						= false
 
 -- Selected
@@ -378,7 +379,6 @@ local Processing = {
 	Amount			= 0,
 	Time				= 0,
 	Delay				= 0,
-	Complete		= 0,
 	Stop				= false
 }
 
@@ -396,24 +396,6 @@ ATSW_Options = {
 ATSW_Attributes = {}
 ATSW_Attributes[realm] = {}
 ATSW_Attributes[realm][player] = {}
-
--- Transform old settings. Remove in the future, 2026 year maybe.
-if ATSW_Unified ~= nil then
-	ATSW_Options.Unified 						= ATSW_Unified
-	ATSW_Options.ConsiderBank 				= ATSW_ConsiderBank
-	ATSW_Options.ConsiderAlts 				= ATSW_ConsiderAlts
-	ATSW_Options.ConsiderMerchants 		= ATSW_ConsiderMerchants
-	ATSW_Options.RecipeTooltip 				= ATSW_RecipeTooltip
-	ATSW_Options.AutoBuy 						= ATSW_AutoBuy
-	ATSW_Options.DisplayShoppingList 		= ATSW_DisplayShoppingList
-	ATSW_Unified = nil
-	ATSW_ConsiderBank = nil
-	ATSW_ConsiderAlts = nil
-	ATSW_ConsiderMerchants = nil
-	ATSW_RecipeTooltip = nil
-	ATSW_AutoBuy = nil
-	ATSW_DisplayShoppingList = nil
-end
 
 -- Controllable tables instead of standard tables do not leave garbage if they change in the game
 
@@ -647,12 +629,23 @@ local function GetSpellNum(Name)
 	until not SName
 end
 
+-- Checked for every visible row, and finding it means scanning the spellbook
+local ProfessionTextures = {}
+
 local function GetProfessionTexture(Name)
-	local SpellNum = GetSpellNum(Name)
-	
-	if SpellNum then
-		return GetSpellTexture(SpellNum, BOOKTYPE_SPELL)
+	if not Name then
+		return
 	end
+	
+	if not ProfessionTextures[Name] then
+		local SpellNum = GetSpellNum(Name)
+		
+		if SpellNum then
+			ProfessionTextures[Name] = GetSpellTexture(SpellNum, BOOKTYPE_SPELL)
+		end
+	end
+	
+	return ProfessionTextures[Name]
 end
 
 local function Icon(Name)
@@ -699,7 +692,7 @@ ATSW_InTime									= 0
 -- Game information get functions
 
 local function GetCraftCaption()
-	local Skill, Rank, MaxRank, Name
+	local Skill, Rank, MaxRank, Name, _
 	
 	if TradeSkill	then		Skill, Rank, MaxRank = GetTradeSkillLine()
 						else		Skill 						= GetCraftName()
@@ -940,7 +933,7 @@ local function AddRecipe(Index)
 	R.Position = Index
 	
 	for I = 1, R.ReagentsSize do
-		Rt = R.Reagents[I]
+		local Rt = R.Reagents[I]
 		
 		Rt.Name, Rt.Texture, Rt.Amount, Rt.PlayerAmount, Rt.Link = GetReagentData(Index, I)
 	end
@@ -1396,8 +1389,6 @@ local function GetCraftingTime(Name, Amount)
 		end
 	end
 end
-
-ATSW_TEST = 9000
 
 function ATSW_TooltipSetSkill(Tooltip, Index)
 	if not Index then
@@ -2153,10 +2144,6 @@ function ATSW_SwitchToFrame(Frame)
 		local F = GetFrame(I)
 		
 		if F:IsVisible() and F ~= Frame then
-			if Frame == ATSWCSFrame then
-				ATSW_SwitchingToEditor = true
-			end
-			
 			HideUIPanel(F)
 		end
 	end
@@ -2305,16 +2292,13 @@ function CloseATSW()
 	end
 end
 
-function ATSW_Hide()
+function ATSW_Hide(Silent)
 	if UIParent:IsVisible() then
 		ATSW_SwitchToFrame()
-		Original_PlaySound('igCharacterInfoClose')
-	end
-	
-	if ATSW_SwitchingToEditor then
-		ATSW_SwitchingToEditor = false
-	else
-		PlaySound('igCharacterInfoClose')
+		
+		if not Silent then
+			Original_PlaySound('igCharacterInfoClose')
+		end
 	end
 	
 	ATSWUpdaterFrame:Hide()
@@ -2776,7 +2760,7 @@ function ATSW_OnEvent()
 	elseif 	event == 'PLAYER_ENTERING_WORLD' 			then
 		
 		ATSW_SaveBag(0)
-		ATSW_Hide()
+		ATSW_Hide(true) -- Not a window closing, so no sound on every loading screen
 		
 		-- Initialize Table
 		local Table = ATSW_NecessaryReagents
@@ -2819,6 +2803,8 @@ function ATSW_OnEvent()
 		
 		if string.find(arg1, ERR_UNLEARN_RECIPE_PATTERN) then 			-- Unlearn profession event
 			local _, _, Skill = string.find(arg1, ERR_UNLEARN_RECIPE_PATTERN)
+			
+			ProfessionTextures[Skill] = nil
 			
 			if ATSW_ProfessionExists(Skill) then
 				-- Reset previous recipes
@@ -3488,10 +3474,6 @@ function ATSW_TypeToNumber(Type)
 	if Type 	== 'none' 	then Number = 0 end
 	
 	return Number
-end
-
-local function GetReagentDataProfName(Name)
-	return ProfessionNamesForReagentData[GetProfessionTexture(Name)]
 end
 
 function ATSW_CompareDifficulty(Left, Right)
@@ -4236,7 +4218,7 @@ function ATSW_UpdateTasks()
 		local Button 			= _G['ATSWTask' .. I]
 		local DeleteButton 	= _G['ATSWTask' .. I .. 'DeleteButton']
 		
-		local Name, Type, Amount, Texture, Link, Cooldown, Pos, Text, TypeColor, Possible
+		local Name, Type, Amount, Texture, Link, Cooldown, Pos, Text, TypeColor, Possible, Time
 		local Index 			= I + Offset
 		local Exist 				= Task(Index)
 		local tR, tG, tB 		= 1, 1, 1
@@ -4736,9 +4718,9 @@ function ATSW_HideRecipe()
 end
 
 function ATSW_SetHighlight(Name)
-	if HighlightButton then
-		HighlightButton:UnlockHighlight()
-		HighlightButton = nil
+	if ATSWHighlight.Button then
+		ATSWHighlight.Button:UnlockHighlight()
+		ATSWHighlight.Button = nil
 	end
 	
 	if Name then
@@ -4751,16 +4733,16 @@ function ATSW_SetHighlight(Name)
 				ATSWHighlight:SetPoint('TOP', Button)
 				ATSWHighlightTexture:SetVertexColor(R, G, B, 0.8)
 				
-				HighlightButton = Button
+				ATSWHighlight.Button = Button
 			end
 		end
 	end
 	
-	if HighlightButton then
-		HighlightButton:LockHighlight()
+	if ATSWHighlight.Button then
+		ATSWHighlight.Button:LockHighlight()
 	end
 	
-	SetVisible(ATSWHighlight, HighlightButton)
+	SetVisible(ATSWHighlight, ATSWHighlight.Button)
 end
 
 function ATSW_UpdateCreateButton()
@@ -4774,7 +4756,7 @@ function ATSW_UpdateCreateButton()
 		Possible = not Processing.Active
 		
 		if not Processing.Active then
-			local Type
+			local _, Type
 			
 			if Position then
 				_, _, Type		= GetCraftNameType(Position)
@@ -4803,7 +4785,7 @@ function ATSW_UpdateCreateButton()
 				Possible = (Position and not GetCraftCooldown(Position)) and (Type ~= 'used') and ATSW_HowManyItemsArePossibleToCreate(RecipeSelected()) >= Amount
 				
 				for I = 1, TasksSize() do
-					Pos = GetPositionFromGame(Task(I).Name)
+					local Pos = GetPositionFromGame(Task(I).Name)
 					
 					if Pos and not GetCraftCooldown(Pos) then
 						if ATSW_HowManyItemsArePossibleToCreate(Task(I).Name, ATSW_POSSIBLE_NOTASK) > 0 then
@@ -5238,7 +5220,7 @@ end
 
 function ATSW_DeleteTask(Name, Amount, Prof)
 	for I = 1, TasksSize(Prof) do
-		T = Task(I, Prof)
+		local T = Task(I, Prof)
 		
 		if T.Name == Name then
 			-- Get removing amount
@@ -5282,8 +5264,6 @@ function ATSW_InitializeProgressBar(StartTime, EndTime)
 	ATSWProgressBar.Working 	= true
 end
 
-ATSW_Time = 0
-
 function ATSW_StartProcessing()
 	ATSWFrame:RegisterEvent('SPELLCAST_INTERRUPTED')
 	
@@ -5293,7 +5273,6 @@ function ATSW_StartProcessing()
 	end
 	
 	Processing.CastDeadline		= nil
-	Processing.Complete			= 0
 	Processing.Stop					= false
 	Processing.Active				= true
 	
@@ -5340,19 +5319,16 @@ end
 -- One craft of the current task has gone off
 function ATSW_CraftFinished()
 	local Bar = ATSWProgressBar
+	local Remaining = 0
 	
 	if Processing.Amount > 1 or Processing.Stop or not ATSW_WindowIsOpen() then
 		ATSW_CompleteTask()
+		Remaining = Processing.Amount
 	else
 		Bar.Mode = ATSW_FLASH -- Start flash animation
 	end
 	
-	local RecipesRemaining = Processing.Amount - Processing.Complete
-	
-	local TimePassed 	= GetTime() - Bar.StartTime
-	local ERT 				= (Processing.RecipeTime + GetLatency()) * RecipesRemaining -- Estimated remaining time
-	
-	Bar.EndTime = GetTime() + TimePassed + ERT
+	Bar.EndTime = GetTime() + (Processing.RecipeTime + GetLatency()) * Remaining
 	
 	Bar:SetMinMaxValues(Bar.StartTime, Bar.EndTime)
 end
@@ -5360,7 +5336,6 @@ end
 function ATSW_CompleteTask()
 	ATSW_DeleteTask(Processing.Recipe, 1, Processing.Profession)
 	Processing.Amount 			= Processing.Amount - 1
-	Processing.Complete 		= Processing.Complete + 1
 	
 	if (Processing.Profession == Profession()) and ATSWFrame:IsVisible() then
 		local Cooldown 			= GetCraftCooldown(GetPositionFromGame(Processing.Recipe))
@@ -5377,8 +5352,36 @@ end
 
 -- Auction/Necessaries functions
 
+-- aux and Aegis: Exchange replace the auction window, and Aegis can swap back to the stock one. They do
+-- this after AUCTION_HOUSE_SHOW, which is why this keeps running while the list is open.
+function ATSW_AttachShoppingList()
+	local List = ATSWShoppingListFrame
+	local Window
+	
+	if aux_frame and aux_frame:IsVisible() then
+		Window = aux_frame
+	elseif AegisExchangeFrame and AegisExchangeFrame:IsVisible() then
+		Window = AegisExchangeFrame
+	elseif AuctionFrame and AuctionFrame:IsVisible() then
+		Window = AuctionFrame
+	end
+	
+	if Window and Window ~= List.AttachedTo then
+		List.AttachedTo = Window
+		List:ClearAllPoints()
+		
+		if Window == AuctionFrame then
+			List:SetPoint('TOPLEFT', Window, 'TOPLEFT', 348, -435.5)
+		else
+			List:SetPoint('TOPRIGHT', Window, 'BOTTOMRIGHT', 30, 0)
+		end
+	end
+end
+
 function ATSW_ShowAuctionShoppingList()
-    if (AuctionFrame and AuctionFrame:IsVisible() or aux_frame and aux_frame:IsVisible()) and 
+    if (AuctionFrame and AuctionFrame:IsVisible()
+	or aux_frame and aux_frame:IsVisible()
+	or AegisExchangeFrame and AegisExchangeFrame:IsVisible()) and 
 	NecessaryReagentsSize() > 0 and 
 	ATSW_Options.DisplayShoppingList then
 		for A = 1, ATSW_AUCTION_ITEMS_DISPLAYED do -- Create auction shopping frame buttons
@@ -5393,13 +5396,8 @@ function ATSW_ShowAuctionShoppingList()
 			end
 		end
 		
-		-- Attach (Compatible with aux)
-        if not aux_frame and AuctionFrame then
-            ATSWShoppingListFrame:SetPoint('TOPLEFT', 'AuctionFrame', 'TOPLEFT', 348, -435.5)
-        else
-            ATSWShoppingListFrame:ClearAllPoints()
-            ATSWShoppingListFrame:SetPoint('TOPRIGHT', 'aux_frame', 'BOTTOMRIGHT', 30, 0)
-        end
+		ATSWShoppingListFrame:SetScript('OnUpdate', ATSW_AttachShoppingList)
+		ATSW_AttachShoppingList()
 		
         ATSWShoppingListFrame:Show()
 		
@@ -5508,6 +5506,8 @@ end
 
 local function RemoveSideSpaces(S)
 	if S then
+		local _
+		
 		_, _, S = string.find(S, '^%s*(.-)%s*$')
 	end
 	
@@ -5525,7 +5525,7 @@ function ATSW_Filter(R, Type)
 		return true
 	end
 	
-	ParameterString = string.lower(ReplaceMagicCharacters(SearchString()))
+	local ParameterString = string.lower(ReplaceMagicCharacters(SearchString()))
 	
 	for I in pairs(Parameters) do
 		Parameters[I] = nil
@@ -5587,6 +5587,8 @@ function ATSW_Filter(R, Type)
 			local PMin, PDirection, PMax
 			
 			if PName == 'rarity' or PName == 'quality' or PName == 'q' then
+				local _
+				
 				_, _, PMin, PDirection, PMax = string.find(PValue, '^(%a+)%s*([%+%-]?)%s*(%a-)$')
 				
 				local QualityNames = {
@@ -5612,6 +5614,8 @@ function ATSW_Filter(R, Type)
 				PMin	=	QualityNames[PMin]
 				PMax	=	QualityNames[PMax]
 			else
+				local _
+				
 				_, _, PMin, PDirection, PMax = string.find(PValue, '^(%d+)%s*([%+%-]?)%s*(%d-)$')
 				
 				PMin =	tonumber(PMin)
@@ -5693,7 +5697,7 @@ function CreateDynamicTooltip(TooltipName)
     Tooltip:SetScale(GetCVar('uiscale'))
 	Tooltip:SetFrameStrata('TOOLTIP')
 
-    function ClearFrameObject(Object, IsTexture)
+    local function ClearFrameObject(Object, IsTexture)
         if Object then
             Object:ClearAllPoints()
 
@@ -5707,13 +5711,13 @@ function CreateDynamicTooltip(TooltipName)
         end
     end
 
-    function IncrementLineCount()
+    local function IncrementLineCount()
         Tooltip.NumLines = Tooltip.NumLines + 1
 
         return Tooltip.NumLines
     end
 
-    function SetPointToPrevious(Object, LineIndex, PrevText)
+    local function SetPointToPrevious(Object, LineIndex, PrevText)
 		Object:ClearAllPoints()
 		
         if LineIndex == 1 then
@@ -5724,7 +5728,7 @@ function CreateDynamicTooltip(TooltipName)
         end
     end
 
-    function CreateTooltipLine(IconPath, LeftText, RightText, R, G, B)
+    local function CreateTooltipLine(IconPath, LeftText, RightText, R, G, B)
         local LineIndex = IncrementLineCount()
 		local Width = 0
 		local IsHeader = LineIndex == 1

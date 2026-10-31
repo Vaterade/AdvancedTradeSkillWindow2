@@ -1,10 +1,9 @@
 # Advanced Trade Skill Window 2
 Improved window for your professions for World of Warcraft vanilla
 
-<sub>version 2.1.16</sub>
+<sub>version 2.1.16-octowow</sub>
 
-### ⚠️Development is suspended because of the closure of TurtleWoW by Blizzard.⚠️
-This means that I can not test any possible issues with the addon.
+This is a fork of [Shellyoung's addon](https://github.com/Shellyoung/AdvancedTradeSkillWindow2), whose development is suspended, for the OctoWoW server. See [OctoWoW changes](#octowow-changes).
 
 ![face](https://github.com/user-attachments/assets/cffb06ff-b310-4fb7-ba07-a04caf6e34a3)
 
@@ -90,12 +89,27 @@ This means that I can not test any possible issues with the addon.
 
   [MissingCrafts](https://github.com/refaim/MissingCrafts) adds a small button that can show what crafting recipes are able to learn.
 
+  ## OctoWoW changes
+
+  - Themes every window when [pfUI](https://github.com/shagu/pfUI) is loaded. It can be turned off in pfUI's settings.
+  - **/atsw disable** and **/atsw enable** switch one profession between ATSW and the stock window.
+  - Works with the Aegis: Exchange auction window: the shopping list attaches to it, but right-clicking an item doesn't search there.
+  - Uses [ClassicAPI](https://github.com/brues-code/ClassicAPI) when it is installed, which it doesn't require:
+    - Other players' profession links open in the stock window.
+    - Item counts redraw once per frame.
+    - Tasks count down from cast events, including after the window closes.
+    - Smelting's name comes from its profession link.
+  - Fixes: Smelting Dreamsteel, buying when reagents are in the bank, the alt inventory tooltip, alts' bank bags counted twice, unlearning a profession with several tasks, a frame leak in the Reagents window, the double close sound, and Jewelcrafting tools.
+
   ## Installation
-  1. Download the following archive: [AdvancedTradeSkillWindow2.rar](https://github.com/Shellyoung/Advanced-Trade-Skill-Window/releases/download/2.1.16/AdvancedTradeSkillWindow2.rar)
+  1. Download this repository's **octowow** branch.
   
-  2. Extract the folder	**AdvancedTradeSkillWindow2** from the archive and place it into the folder **World of Warcraft\Interface\AddOns**.
+  2. Place its folder into **World of Warcraft\Interface\AddOns** and name it **AdvancedTradeSkillWindow2**.
   
   ## Credits
+  
+  ###### Advanced Trade Skill Window 2:
+  [**Shellyoung**](https://github.com/Shellyoung) (Alexander Shelokhnev)
   
   ###### Original idea:
   **Rene Schneider** (**Slarti** on EU-Blackhand) in 2006 
