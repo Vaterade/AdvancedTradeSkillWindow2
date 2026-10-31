@@ -2510,14 +2510,22 @@ function Stock.Show(Prof, Linked)
 	Stock.Profession = Prof
 	Stock.Linked = Linked
 	
+	-- The queue works on ATSW's tables for the open profession, whichever window it's using
+	if not Linked then
+		GetProfession()
+		InitializeTables()
+	end
+	
 	if TradeSkill then
 		Stock.Window = TradeSkillFrame
 		RegisterEvents(TradeSkillFrame, 'TRADE_SKILL_UPDATE', 'PLAYER_ENTERING_WORLD')
 		TradeSkillFrame_Show()
+		ATSWQueue.Attach(TradeSkillFrame, TradeSkillCancelButton, Prof, Linked)
 	else
 		Stock.Window = CraftFrame
 		RegisterEvents(CraftFrame, 'CRAFT_UPDATE', 'SPELLS_CHANGED', 'UNIT_PET_TRAINING_POINTS')
 		CraftFrame_Show()
+		ATSWQueue.Attach(CraftFrame, CraftCancelButton, Prof, Linked)
 	end
 end
 
@@ -2558,6 +2566,139 @@ function Stock.IsLinked()
 		return IsTradeSkillLinked and IsTradeSkillLinked()
 	else
 		return IsCraftLinked and IsCraftLinked()
+	end
+end
+
+-- The stock window's filters and collapsed headers change which recipes exist and what position they
+-- are at, so anything that needs a recipe runs inside this. It only changes the list if it has to, and
+-- puts it back. The stock window's search box only hides rows on screen, so it needs no handling.
+function Stock.WithFullList(Run)
+	local SubClass, InvSlot, Selected, Collapsed
+	
+	if TradeSkill then
+		for I = 0, table.getn({GetTradeSkillSubClasses()}) do
+			if GetTradeSkillSubClassFilter(I) then
+				SubClass = I
+				break
+			end
+		end
+		
+		for I = 0, table.getn({GetTradeSkillInvSlots()}) do
+			if GetTradeSkillInvSlotFilter(I) then
+				InvSlot = I
+				break
+			end
+		end
+		
+		Selected = GetTradeSkillSelectionIndex()
+		
+		if SubClass and SubClass > 0 then
+			SetTradeSkillSubClassFilter(0, 1, 1)
+		end
+		
+		if InvSlot and InvSlot > 0 then
+			SetTradeSkillInvSlotFilter(0, 1, 1)
+		end
+		
+		for I = 1, GetNumTradeSkills() do
+			local Name, Type, _, Expanded = GetTradeSkillInfo(I)
+			
+			if Type == 'header' and not Expanded then
+				Collapsed = Collapsed or {}
+				Collapsed[Name] = true
+			end
+		end
+		
+		if Collapsed then
+			ExpandTradeSkillSubClass(0)
+		end
+	end
+	
+	RecipesSize(0)
+	
+	for I = 1, GetCraftCount() do
+		AddRecipe(I)
+	end
+	
+	-- Whatever happens in Run, the player's list has to come back
+	local Succeeded, Failure = pcall(Run)
+	
+	if TradeSkill then
+		if Collapsed then
+			for I = GetNumTradeSkills(), 1, -1 do
+				local Name, Type = GetTradeSkillInfo(I)
+				
+				if Type == 'header' and Collapsed[Name] then
+					CollapseTradeSkillSubClass(I)
+				end
+			end
+		end
+		
+		if InvSlot and InvSlot > 0 then
+			SetTradeSkillInvSlotFilter(InvSlot, 1, 1)
+		end
+		
+		if SubClass and SubClass > 0 then
+			SetTradeSkillSubClassFilter(SubClass, 1, 1)
+		end
+		
+		if Collapsed or (InvSlot and InvSlot > 0) or (SubClass and SubClass > 0) then
+			SelectTradeSkill(Selected)
+		end
+	end
+	
+	if not Succeeded then
+		error(Failure, 0)
+	end
+end
+
+function ATSW_QueueAdd(Name, Amount)
+	Stock.WithFullList(function()
+		if GetRecipePosition(Name) then
+			ATSW_AddTask(Name, Amount)
+		end
+	end)
+end
+
+function ATSW_QueueDelete(Name)
+	Stock.WithFullList(function()
+		ATSW_DeleteTask(Name)
+	end)
+end
+
+-- Starts the first task that can be made, like ATSW's Create button
+function ATSW_QueueStart()
+	local Started = false
+	
+	Stock.WithFullList(function()
+		for I = 1, TasksSize() do
+			local T = Task(I)
+			local Pos = GetPositionFromGame(T.Name)
+			
+			if Pos and not GetCraftCooldown(Pos) and ATSW_HowManyItemsArePossibleToCreate(T.Name, ATSW_POSSIBLE_NOTASK) > 0 then
+				ATSW_Craft(T.Name, T.Amount)
+				Started = true
+				
+				break
+			end
+		end
+	end)
+	
+	return Started
+end
+
+function ATSW_QueueStop()
+	SpellStopCasting()
+	ATSW_StopProcessing()
+end
+
+function ATSW_QueueIsCrafting()
+	return Processing.Active
+end
+
+function ATSW_CheckBatchTimeout()
+	if Processing.CastDeadline and GetTime() > Processing.CastDeadline then
+		ATSW_StopProcessing()
 	end
 end
 
@@ -5211,6 +5352,10 @@ function ATSW_AddTask(Name, Amount, Link, Texture, Recursive, NecessaryReagentMo
 					ATSW_UpdateRecipes()
 					ATSW_UpdateTasks()
 				end
+				
+				if not Recursive then
+					ATSWQueue.Update()
+				end
 			end
 		else
 			ATSW_SetNecessary(Name, Amount, Link, Texture, NecessaryReagentMode)
@@ -5246,6 +5391,8 @@ function ATSW_DeleteTask(Name, Amount, Prof)
 				ATSW_UpdateTasks()
 			end
 			
+			ATSWQueue.Update()
+			
 			break
 		end
 	end
@@ -5276,7 +5423,11 @@ function ATSW_StartProcessing()
 	Processing.Stop					= false
 	Processing.Active				= true
 	
-	ATSW_UpdateTasks()
+	if ATSW_WindowIsOpen() then
+		ATSW_UpdateTasks()
+	end
+	
+	ATSWQueue.Update()
 end
 
 function ATSW_PushCreateButton(State)
@@ -5314,6 +5465,8 @@ function ATSW_StopProcessing()
 	if ATSW_WindowIsOpen() then
 		ATSW_UpdateTasks()
 	end
+	
+	ATSWQueue.Update()
 end
 
 -- One craft of the current task has gone off

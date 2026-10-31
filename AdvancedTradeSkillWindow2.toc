@@ -15,4 +15,5 @@ AdvancedTradeSkillWindow2.lua
 AdvancedTradeSkillWindow2.xml
 CustomSorting.lua
 CustomSorting.xml
+QueueSidebar.lua
 pfUISkin.lua

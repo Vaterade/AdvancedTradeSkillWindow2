@@ -1563,3 +1563,11 @@ ATSW_PROFESSION_DISABLED		= 'ATSW is off for %s. Type /atsw enable with its wind
 ATSW_PROFESSION_ENABLED		= 'ATSW is on for %s.'
 ATSW_OPEN_PROFESSION_FIRST	= 'Open a profession window first.'
 ATSW_LINKED_PROFESSION			= 'This window shows another player\'s profession, so ATSW stays off for it.'
+
+-- The task queue sidebar. Also not translated yet.
+ATSW_QUEUE_TITLE					= 'Tasks'
+ATSW_QUEUE_EMPTY				= 'No tasks queued.'
+ATSW_QUEUE_NOTHING				= 'You don\'t have the reagents for any queued task.'
+ATSW_QUEUE_ADD						= 'Add to Queue'
+ATSW_QUEUE_START					= 'Start'
+ATSW_QUEUE_STOP					= 'Stop'

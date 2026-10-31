@@ -327,6 +327,24 @@ pfUI:RegisterSkin('AdvancedTradeSkillWindow2', function()
 
 	CreateBackdrop(ATSWRecipeTooltip, nil, true)
 
+	-- Task queue sidebar
+
+	CreateBackdrop(ATSWQueueFrame, nil, true)
+	CreateBackdropShadow(ATSWQueueFrame)
+
+	-- The profession window stacks two see-through backdrops, and this has only one to match them with
+	local QueueR, QueueG, QueueB = GetStringColor(pfUI_config.appearance.border.background)
+	ATSWQueueFrame:SetBackdropColor(QueueR, QueueG, QueueB, 0.95)
+	SkinButton(ATSWQueueAddButton)
+	SkinButton(ATSWQueueReagentsButton)
+	SkinButton(ATSWQueueStartButton)
+	CreateBackdrop(ATSWQueueToggleButton)
+	SkinScrollFrame(ATSWQueueScrollFrame)
+
+	for R = 1, 20 do
+		SkinCloseButton(_G['ATSWQueueDelete' .. R])
+	end
+
 	-- Fonts. ATSW_UpdateRecipes and the recipe tooltip read this one each time they draw.
 
 	_G.ATSW_FontFile = pfUI.font_default
@@ -335,6 +353,7 @@ pfUI:RegisterSkin('AdvancedTradeSkillWindow2', function()
 	ApplyFont(ATSWCSFrame)
 	ApplyFont(ATSWConfigFrame)
 	ApplyFont(ATSWBuyNecessaryFrame)
+	ApplyFont(ATSWQueueFrame)
 
 	-- Things the addon changes or creates later
 
